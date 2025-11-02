@@ -25,7 +25,7 @@ class AutoAllowGUI:
         
         # 🔧 新增：記錄連接失敗的視窗，避免頻繁重試
         self.failed_connections = {}  # {hwnd: (fail_count, last_fail_time)}
-        self.max_connection_failures = 10  # 連續失敗 10 次後暫時跳過
+        self.max_connection_failures = 5  # 連續失敗 5 次後暫時跳過（降低阈值）
         
         # 創建 GUI
         self.root = tk.Tk()
@@ -73,6 +73,22 @@ class AutoAllowGUI:
             width=15
         )
         self.toggle_btn.pack(side=tk.LEFT, padx=10)
+        
+        # 重置按鈕
+        self.reset_btn = tk.Button(
+            btn_container,
+            text="🔄 重置狀態",
+            command=self.reset_failed_connections,
+            font=("Microsoft YaHei UI", 12, "bold"),
+            bg="#9b59b6",
+            fg="white",
+            padx=30,
+            pady=12,
+            relief=tk.FLAT,
+            cursor="hand2",
+            width=15
+        )
+        self.reset_btn.pack(side=tk.LEFT, padx=10)
         
         # 掃描按鈕
         self.scan_btn = tk.Button(
@@ -233,6 +249,14 @@ class AutoAllowGUI:
         self.log_text.delete(1.0, tk.END)
         self.log("日誌已清空", "INFO")
     
+    def reset_failed_connections(self):
+        """重置失敗連接記錄"""
+        count = len(self.failed_connections)
+        self.failed_connections.clear()
+        self.log(f"🔄 已重置 {count} 個失敗連接記錄，所有視窗將重新嘗試連接", "SUCCESS")
+        if count > 0:
+            self.log("💡 提示：如果剛才有視窗被跳過，現在會重新掃描", "INFO")
+    
     def get_process_name_from_hwnd(self, hwnd):
         """獲取進程名稱"""
         if hwnd == 0:
@@ -285,14 +309,14 @@ class AutoAllowGUI:
             # 🔧 檢查是否應該跳過此視窗（連接失敗太多次）
             if hwnd in self.failed_connections:
                 fail_count, last_fail_time = self.failed_connections[hwnd]
-                # 如果連續失敗次數過多，且距離上次失敗不到 30 秒，則跳過
+                # 如果連續失敗次數過多，且距離上次失敗不到 15 秒，則跳過（縮短為 15 秒）
                 if fail_count >= self.max_connection_failures:
-                    if (datetime.now() - last_fail_time).total_seconds() < 30:
+                    if (datetime.now() - last_fail_time).total_seconds() < 15:
                         return False
                     else:
-                        # 超過 30 秒，重置計數器，重新嘗試
+                        # 超過 15 秒，重置計數器，重新嘗試
                         self.failed_connections[hwnd] = (0, datetime.now())
-                        self.log(f"🔄 重新嘗試連接視窗 {hwnd}", "INFO")
+                        self.log(f"🔄 視窗 {hwnd} 重新嘗試連接", "INFO")
             
             # 🔧 重要：每次都重新連接到視窗，確保獲取最新的 UI 樹
             try:
@@ -540,17 +564,20 @@ class AutoAllowGUI:
                 
                 # 檢查是否應該跳過（連接失敗太多次）
                 should_skip = False
+                skip_reason = ""
                 if hwnd in self.failed_connections:
                     fail_count, last_fail_time = self.failed_connections[hwnd]
                     if fail_count >= self.max_connection_failures:
-                        if (datetime.now() - last_fail_time).total_seconds() < 30:
+                        time_since_fail = (datetime.now() - last_fail_time).total_seconds()
+                        if time_since_fail < 15:
                             should_skip = True
                             skipped_windows += 1
+                            skip_reason = f"失敗 {fail_count} 次，等待 {15 - int(time_since_fail)}s"
                 
                 # 掃描這個視窗（不激活）
                 if should_skip:
                     has_allow = False
-                    status = "⏭️ 暫時跳過（連接失敗）"
+                    status = f"⏭️ 跳過 ({skip_reason})"
                     tag = "skipped"
                 else:
                     try:
