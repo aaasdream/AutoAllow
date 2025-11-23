@@ -14,6 +14,8 @@ from datetime import datetime
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext
+import sys
+import argparse
 
 class AutoAllowGUI:
     def __init__(self):
@@ -22,6 +24,12 @@ class AutoAllowGUI:
         self.scan_count = 0
         self.vscode_windows = {}
         self.monitor_thread = None
+        
+        # 解析命令列參數
+        parser = argparse.ArgumentParser(description='VS Code Auto Allow')
+        parser.add_argument('--ai-mode', action='store_true', help='啟用 AI 模式 (自動開始 + 控制台輸出)')
+        args, _ = parser.parse_known_args()
+        self.ai_mode = args.ai_mode
         
         # 🔧 新增：記錄連接失敗的視窗，避免頻繁重試
         self.failed_connections = {}  # {hwnd: (fail_count, last_fail_time)}
@@ -243,6 +251,10 @@ class AutoAllowGUI:
         
         # 自動滾動到底部
         self.log_text.see(tk.END)
+        
+        # 如果是 AI 模式，同時輸出到控制台
+        if self.ai_mode:
+            print(f"[{timestamp}] [{level}] {message}")
     
     def clear_log(self):
         """清空日誌"""
@@ -340,188 +352,105 @@ class AutoAllowGUI:
             
             # 增加搜尋深度並增加等待時間，確保 UI 已載入
             # 搜尋多種類型的按鈕控制項
+            # 優先順序：Button > SplitButton > MenuButton > MenuItem > Hyperlink > Text
             button_types = [
-                "Button",           # 普通按鈕
-                "SplitButton",      # 分割按鈕（帶下拉選單）
+                "Button",           # 普通按鈕 (最常見)
+                "SplitButton",      # 分割按鈕
                 "MenuButton",       # 選單按鈕
                 "MenuItem",         # 選單項目
+                "Hyperlink",        # 超連結
+                "Text",             # 文字 (最慢，最後檢查)
             ]
             
-            all_buttons = []
             for btn_type in button_types:
                 try:
-                    # 🔧 增加搜尋深度到 30，並增加超時時間
-                    buttons = window.descendants(control_type=btn_type, depth=30)
-                    all_buttons.extend([(btn, btn_type) for btn in buttons])
-                except Exception as e:
-                    # 如果該類型搜尋失敗，繼續下一個
-                    continue
-            
-            if not all_buttons:
-                return False
-            
-            for button, btn_type in all_buttons:
-                try:
-                    # 🔧 確保獲取最新的元素資訊
-                    try:
-                        button.element_info.update()
-                    except:
-                        pass
+                    # 🔧 優化：根據類型調整搜尋深度
+                    # Button/SplitButton 通常比較淺，Text 可能比較深
+                    search_depth = 20 if btn_type in ["Button", "SplitButton"] else 30
                     
-                    element_info = button.element_info
-                    name = getattr(element_info, 'name', '').lower()
+                    # 獲取該類型的所有元素
+                    buttons = window.descendants(control_type=btn_type, depth=search_depth)
                     
-                    # Allow 相關關鍵字
-                    allow_keywords = ['allow', '允許', 'accept', 'confirm']
-                    
-                    # 排除關鍵字
-                    exclude_keywords = ['section', 'explorer', 'autoallow', 'folder', 'directory']
-                    
-                    # 檢查是否應該排除
-                    should_exclude = any(ex in name for ex in exclude_keywords)
-                    if should_exclude:
-                        continue
-                    
-                    # 檢查是否匹配 Allow
-                    if any(keyword in name for keyword in allow_keywords):
-                        button_name = getattr(element_info, 'name', '')
-                        
-                        # 檢查按鈕是否可用和可見
+                    # 立即檢查這些元素，如果找到就馬上點擊並返回
+                    for button in buttons:
                         try:
-                            is_enabled = button.is_enabled()
-                            # 🔧 新增：檢查元素是否真的存在於 UI 樹中
+                            # 🔧 確保獲取最新的元素資訊
                             try:
-                                is_visible = button.is_visible()
+                                button.element_info.update()
                             except:
-                                is_visible = True  # 如果無法檢查，假設可見
-                        except:
-                            # 如果無法檢查狀態，假設可用
-                            is_enabled = True
-                            is_visible = True
-                        
-                        if is_enabled and is_visible:
-                            self.log(f"🎯 找到 Allow 按鈕: '{button_name}' (類型: {btn_type}, HWND: {hwnd})", "SUCCESS")
+                                pass
                             
-                            # 🔧 改進：嘗試多種點擊方法，增加成功率
-                            click_methods = [
-                                ('invoke', lambda: button.invoke()),
-                                ('click_input', lambda: button.click_input()),
-                                ('click', lambda: button.click())
-                            ]
+                            element_info = button.element_info
+                            name = getattr(element_info, 'name', '').lower()
                             
-                            for method_name, method_func in click_methods:
+                            # Allow 相關關鍵字
+                            allow_keywords = ['allow', '允許', 'accept', 'confirm']
+                            
+                            # 排除關鍵字
+                            exclude_keywords = ['section', 'explorer', 'autoallow', 'folder', 'directory']
+                            
+                            # 檢查是否應該排除
+                            should_exclude = any(ex in name for ex in exclude_keywords)
+                            if should_exclude:
+                                continue
+                            
+                            # 檢查是否匹配 Allow
+                            if any(keyword in name for keyword in allow_keywords):
+                                button_name = getattr(element_info, 'name', '')
+                                
+                                # 對於 Text 類型，必須是精確匹配或很短的詞
+                                if btn_type == "Text":
+                                    if len(name) > 30: 
+                                        continue
+
+                                # 檢查按鈕是否可用和可見
                                 try:
-                                    method_func()
-                                    self.click_count += 1
-                                    self.log(f"✅ 使用 {method_name}() 成功點擊！(第 {self.click_count} 次)", "SUCCESS")
-                                    return True
-                                except Exception as e:
-                                    self.log(f"⚠️ {method_name}() 失敗: {e}", "DEBUG")
+                                    is_enabled = button.is_enabled()
+                                except:
+                                    is_enabled = True
+                                    
+                                try:
+                                    is_visible = button.is_visible()
+                                except:
+                                    is_visible = True 
+
+                                # 即使不可見，如果名字匹配，也嘗試點擊
+                                if is_enabled:
+                                    if not is_visible:
+                                        self.log(f"⚠️ 發現隱藏的 Allow 元素: '{button_name}' (類型: {btn_type}) - 嘗試強制點擊", "WARNING")
+                                    else:
+                                        self.log(f"🎯 找到 Allow 按鈕: '{button_name}' (類型: {btn_type}, HWND: {hwnd})", "SUCCESS")
+                                    
+                                    # 嘗試點擊
+                                    click_methods = [
+                                        ('invoke', lambda: button.invoke()),
+                                        ('click_input', lambda: button.click_input()),
+                                        ('click', lambda: button.click())
+                                    ]
+                                    
+                                    for method_name, method_func in click_methods:
+                                        try:
+                                            method_func()
+                                            self.click_count += 1
+                                            self.log(f"✅ 使用 {method_name}() 成功點擊！(第 {self.click_count} 次)", "SUCCESS")
+                                            return True
+                                        except Exception as e:
+                                            self.log(f"⚠️ {method_name}() 失敗: {e}", "DEBUG")
+                                            continue
+                                    
+                                    self.log(f"❌ 所有點擊方法都失敗", "ERROR")
                                     continue
+                        
+                        except Exception as e:
+                            continue
                             
-                            # 所有方法都失敗
-                            self.log(f"❌ 所有點擊方法都失敗", "ERROR")
-                            return False
-                
                 except Exception as e:
-                    # 單個按鈕檢查失敗，繼續下一個
                     continue
             
             return False
             
         except Exception as e:
             self.log(f"❌ 掃描視窗 {hwnd} 時發生錯誤: {e}", "ERROR")
-            return False
-            
-            # 增加搜尋深度並增加等待時間，確保 UI 已載入
-            # 搜尋多種類型的按鈕控制項
-            button_types = [
-                "Button",           # 普通按鈕
-                "SplitButton",      # 分割按鈕（帶下拉選單）
-                "MenuButton",       # 選單按鈕
-                "MenuItem",         # 選單項目
-            ]
-            
-            all_buttons = []
-            for btn_type in button_types:
-                try:
-                    # 🔧 增加搜尋深度到 30，並增加超時時間
-                    buttons = window.descendants(control_type=btn_type, depth=30)
-                    all_buttons.extend([(btn, btn_type) for btn in buttons])
-                except Exception as e:
-                    # 如果該類型搜尋失敗，繼續下一個
-                    continue
-            
-            if not all_buttons:
-                return False
-            
-            for button, btn_type in all_buttons:
-                try:
-                    # 🔧 確保獲取最新的元素資訊
-                    try:
-                        button.element_info.update()
-                    except:
-                        pass
-                    
-                    element_info = button.element_info
-                    name = getattr(element_info, 'name', '').lower()
-                    
-                    # Allow 相關關鍵字
-                    allow_keywords = ['allow', '允許', 'accept', 'confirm']
-                    
-                    # 排除關鍵字
-                    exclude_keywords = ['section', 'explorer', 'autoallow', 'folder', 'directory']
-                    
-                    # 檢查是否應該排除
-                    should_exclude = any(ex in name for ex in exclude_keywords)
-                    if should_exclude:
-                        continue
-                    
-                    # 檢查是否匹配 Allow
-                    if any(keyword in name for keyword in allow_keywords):
-                        button_name = getattr(element_info, 'name', '')
-                        
-                        # 檢查按鈕是否可用和可見
-                        try:
-                            is_enabled = button.is_enabled()
-                            # 🔧 新增：檢查元素是否真的存在於 UI 樹中
-                            try:
-                                is_visible = button.is_visible()
-                            except:
-                                is_visible = True  # 如果無法檢查，假設可見
-                        except:
-                            # 如果無法檢查狀態，假設可用
-                            is_enabled = True
-                            is_visible = True
-                        
-                        if is_enabled and is_visible:
-                            self.log(f"🎯 找到 Allow 按鈕: '{button_name}' (類型: {btn_type}, HWND: {hwnd})", "SUCCESS")
-                            
-                            # 🔧 改進：嘗試多種點擊方法，增加成功率
-                            click_methods = [
-                                ('invoke', lambda: button.invoke()),
-                                ('click_input', lambda: button.click_input()),
-                                ('click', lambda: button.click())
-                            ]
-                            
-                            for method_name, method_func in click_methods:
-                                try:
-                                    method_func()
-                                    self.click_count += 1
-                                    self.log(f"✅ 使用 {method_name}() 成功點擊！(第 {self.click_count} 次)", "SUCCESS")
-                                    return True
-                                except Exception as e:
-                                    self.log(f"⚠️ {method_name}() 失敗: {e}", "DEBUG")
-                                    continue
-                            
-                            # 所有方法都失敗
-                            self.log(f"❌ 所有點擊方法都失敗", "ERROR")
-                            return False
-                
-                except Exception as e:
-                    # 單個按鈕檢查失敗，繼續下一個
-                    continue
-            
             return False
             
         except Exception as e:
@@ -694,8 +623,14 @@ class AutoAllowGUI:
         """運行 GUI"""
         self.log("🚀 VS Code Auto Allow 已啟動", "SUCCESS")
         self.log("支援多個 VS Code 視窗同時監控", "INFO")
-        self.log("點擊「立即掃描」或「開始監控」開始運作", "INFO")
         self.log("⚠️ 程式不會自動開啟新視窗，只監控現有的 VS Code", "WARNING")
+        
+        if self.ai_mode:
+            self.log("🤖 AI 模式已啟用：輸出日誌到控制台", "SUCCESS")
+            
+        # 自動開始監控
+        self.log("⏳ 1秒後自動開始監控...", "INFO")
+        self.root.after(1000, self.toggle_monitoring)
         
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.mainloop()
