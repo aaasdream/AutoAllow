@@ -1,6 +1,6 @@
 """
-VS Code Chat Auto Allow - GUI 版本
-支援多個 VS Code 視窗的自動 Allow 點擊
+VS Code / Antigravity Auto Allow - GUI 版本
+支援多個 VS Code 或 Antigravity 視窗的自動 Allow 點擊
 智慧掃描：優先掃描活躍視窗，減少資源消耗
 """
 
@@ -25,7 +25,7 @@ class AutoAllowGUI:
         self.monitor_thread = None
         
         # 解析命令列參數
-        parser = argparse.ArgumentParser(description='VS Code Auto Allow')
+        parser = argparse.ArgumentParser(description='VS Code / Antigravity Auto Allow')
         parser.add_argument('--ai-mode', action='store_true', help='啟用 AI 模式 (自動開始 + 控制台輸出)')
         args, _ = parser.parse_known_args()
         self.ai_mode = args.ai_mode
@@ -46,7 +46,7 @@ class AutoAllowGUI:
         
         # 創建 GUI
         self.root = tk.Tk()
-        self.root.title("VS Code Auto Allow - 智慧掃描")
+        self.root.title("VS Code / Antigravity Auto Allow - 智慧掃描")
         self.root.geometry("1000x700")
         self.setup_ui()
         
@@ -59,7 +59,7 @@ class AutoAllowGUI:
         
         title = tk.Label(
             header,
-            text="🤖 VS Code Chat Auto Allow (智慧掃描版)",
+            text="🤖 VS Code / Antigravity Auto Allow (智慧掃描版)",
             font=("Microsoft YaHei UI", 18, "bold"),
             fg="white",
             bg="#2c3e50"
@@ -151,7 +151,7 @@ class AutoAllowGUI:
         self.stats_labels = {}
         
         stats_data = [
-            ("windows", "VS Code 視窗", "0"),
+            ("windows", "監控視窗", "0"),
             ("active", "活躍視窗", "0"),
             ("scans", "掃描次數", "0"),
             ("clicks", "點擊次數", "0"),
@@ -186,7 +186,7 @@ class AutoAllowGUI:
         
         tk.Label(
             list_frame,
-            text="📋 監控中的 VS Code 視窗 (🔥=活躍視窗，優先深度掃描)",
+            text="📋 監控中的視窗 (VS Code / Antigravity) (🔥=活躍視窗，優先深度掃描)",
             font=("Microsoft YaHei UI", 11, "bold"),
             anchor=tk.W
         ).pack(fill=tk.X, pady=(0, 5))
@@ -333,7 +333,11 @@ class AutoAllowGUI:
                 if not title or len(title.strip()) == 0:
                     return True
                 
-                if process_name == "code" and "Visual Studio Code" in title:
+                # 支援 VS Code 和 Antigravity
+                is_vscode = process_name == "code" and "Visual Studio Code" in title
+                is_antigravity = "antigravity" in process_name or "Antigravity" in title
+                
+                if is_vscode or is_antigravity:
                     windows.append({
                         "hwnd": hwnd,
                         "title": title,
@@ -446,7 +450,7 @@ class AutoAllowGUI:
                             allow_patterns = [
                                 'allow',    # 英文
                                 '允許',     # 中文
-                                'accept',   # 接受
+                                'accept',   # 接受 (Antigravity)
                                 '接受',
                                 'confirm',  # 確認
                                 '確認',
@@ -812,9 +816,9 @@ class AutoAllowGUI:
     
     def run(self):
         """運行 GUI"""
-        self.log("🚀 VS Code Auto Allow (智慧掃描版) 已啟動", "SUCCESS")
+        self.log("🚀 VS Code / Antigravity Auto Allow (智慧掃描版) 已啟動", "SUCCESS")
         self.log("✨ 新功能：智慧分層掃描，優先掃描活躍視窗", "INFO")
-        self.log("⚠️ 程式不會自動開啟新視窗，只監控現有的 VS Code", "WARNING")
+        self.log("⚠️ 程式不會自動開啟新視窗，只監控現有的 VS Code / Antigravity", "WARNING")
         
         if self.ai_mode:
             self.log("🤖 AI 模式已啟用：輸出日誌到控制台", "SUCCESS")
